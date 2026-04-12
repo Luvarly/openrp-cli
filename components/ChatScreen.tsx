@@ -1,8 +1,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { Box, Text, useInput, useStdout } from "ink";
 import TextInput from "ink-text-input";
-import { type Scenario } from "../lib/scenarios";
-import { type Message, type ToolEvent, streamCompletion } from "../lib/api";
+import { type Scenario, type StarterCharacter } from "../lib/scenarios.js";
+import { type Message, type ToolEvent, streamCompletion } from "../lib/api.js";
 import {
   type Character,
   type CharacterMap,
@@ -10,30 +10,31 @@ import {
   upsertCharacter,
   updateMood,
   buildSystemPrompt,
-} from "../lib/characters";
+} from "../lib/characters.js";
+import {
+  type ChatEntry,
+  type Session,
+  generateSessionId,
+  saveSession,
+  buildPreview,
+} from "../lib/sessions.js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface Props {
   scenario: Scenario;
+  initialSession?: Session;
   onBack: () => void;
 }
 
 type Status = "idle" | "streaming" | "error";
 
-// Speech entries are self-contained — display info embedded at creation time.
-type ChatEntry =
-  | { kind: "user"; text: string }
-  | { kind: "speech"; name: string; icon: string; color: string; text: string }
-  | { kind: "narrator"; text: string }
-  | { kind: "system"; text: string };
-
 // ─── Layout constants ─────────────────────────────────────────────────────────
 
-const SIDEBAR_WIDTH = 24; // includes border chars
-const HEADER_LINES = 3; // icon+title row + divider
-const FOOTER_LINES = 3; // divider + input row + bottom padding
-const H_PADDING = 4; // paddingX={2} each side
+const SIDEBAR_WIDTH = 24;
+const HEADER_LINES = 3;
+const FOOTER_LINES = 3;
+const H_PADDING = 4;
 
 // ─── Word-wrap ────────────────────────────────────────────────────────────────
 
@@ -50,7 +51,6 @@ function wrapText(text: string, maxWidth: number): string[] {
       const candidate = line ? line + " " + word : word;
       if (candidate.length > maxWidth) {
         if (line) out.push(line);
-        // hard-break words longer than maxWidth
         line = word.length > maxWidth ? word.slice(0, maxWidth) : word;
       } else {
         line = candidate;
@@ -62,13 +62,11 @@ function wrapText(text: string, maxWidth: number): string[] {
 }
 
 // ─── Line counting ────────────────────────────────────────────────────────────
-// We pre-compute how many terminal lines each entry consumes so we can
-// fill the pane from the bottom without relying on Ink's overflow clipping.
 
 function entryLineCount(entry: ChatEntry, contentWidth: number): number {
   switch (entry.kind) {
     case "user":
-      return 1 + wrapText(entry.text, contentWidth - 2).length + 1; // label + lines + margin
+      return 1 + wrapText(entry.text, contentWidth - 2).length + 1;
     case "speech":
       return 1 + wrapText(entry.text, contentWidth - 2).length + 1;
     case "narrator":
@@ -84,7 +82,7 @@ function entryLineCount(entry: ChatEntry, contentWidth: number): number {
 
 function CharacterSidebar({ characters }: { characters: CharacterMap }) {
   const chars = Object.values(characters);
-  const innerWidth = SIDEBAR_WIDTH - 4; // borders + padding
+  const innerWidth = SIDEBAR_WIDTH - 4;
   return (
     <Box
       flexDirection="column"
@@ -134,7 +132,7 @@ function EntryView({
   entry: ChatEntry;
   contentWidth: number;
 }) {
-  const innerWidth = contentWidth - 2; // 2-char indent
+  const innerWidth = contentWidth - 2;
 
   if (entry.kind === "user") {
     return (
@@ -197,128 +195,165 @@ function EntryView({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ChatScreen({ scenario, onBack }: Props) {
+export default function ChatScreen({ scenario, initialSession, onBack }: Props) {
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 100;
   const termHeight = stdout?.rows ?? 30;
 
-  // Exact pixel budget for the chat pane
   const chatPaneWidth = termWidth - SIDEBAR_WIDTH - H_PADDING;
-  const contentWidth = Math.max(20, chatPaneWidth); // never go negative
+  const contentWidth = Math.max(20, chatPaneWidth);
   const chatPaneHeight = termHeight - HEADER_LINES - FOOTER_LINES;
 
-  // ── State ──
-  const [characters, setCharacters] = useState<CharacterMap>(() =>
-    loadCharacters(scenario.id),
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  const [characters, setCharacters] = useState<CharacterMap>(() => {
+    if (initialSession) return initialSession.characters;
+    // Fresh session: load saved characters, then seed starters for any missing.
+    const saved = loadCharacters(scenario.id);
+    const seeded = { ...saved };
+    for (const sc of scenario.starterCharacters ?? []) {
+      if (!seeded[sc.id]) seeded[sc.id] = { ...sc, createdAt: 0 };
+    }
+    return seeded;
+  });
+
+  const [entries, setEntries] = useState<ChatEntry[]>(
+    () => initialSession?.entries ?? [],
   );
-  const [entries, setEntries] = useState<ChatEntry[]>([]);
-  const [history, setHistory] = useState<Message[]>([]);
+
+  const [history, setHistory] = useState<Message[]>(
+    () => initialSession?.history ?? [],
+  );
+
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
   const [errorMsg, setErrorMsg] = useState("");
 
-  // Ref always has latest characters — safe to read inside async callbacks.
+  // ── Refs ───────────────────────────────────────────────────────────────────
+
+  // Mirror refs so async callbacks always read the latest values.
   const charactersRef = useRef<CharacterMap>(characters);
-  useEffect(() => {
-    charactersRef.current = characters;
-  }, [characters]);
+  const entriesRef = useRef<ChatEntry[]>(entries);
+  const historyRef = useRef<Message[]>(history);
+
+  useEffect(() => { charactersRef.current = characters; }, [characters]);
+  useEffect(() => { historyRef.current = history; }, [history]);
+  // entriesRef is kept in sync inline during setEntries calls below.
+
+  // Session ID — created on first message send, reused for auto-saves.
+  const sessionIdRef = useRef<string>(initialSession?.id ?? "");
 
   useInput((_ch, key) => {
     if (key.escape) onBack();
   });
 
-  // ── Visible entries — fill from bottom up to chatPaneHeight ───────────────
+  // ── Visible entries ────────────────────────────────────────────────────────
 
   const visibleEntries = (() => {
-    // reserve 1 line for the cursor blink when streaming
     const budget = chatPaneHeight - (status === "streaming" ? 1 : 0);
     let used = 0;
     const result: ChatEntry[] = [];
     for (let i = entries.length - 1; i >= 0; i--) {
-      const lines = entryLineCount(entries[i], contentWidth);
+      const lines = entryLineCount(entries[i]!, contentWidth);
       if (used + lines > budget) break;
-      result.unshift(entries[i]);
+      result.unshift(entries[i]!);
       used += lines;
     }
     return result;
   })();
 
-  // ── Send message ──────────────────────────────────────────────────────────
+  // ── Send message ───────────────────────────────────────────────────────────
 
   const sendMessage = useCallback(async () => {
     const text = input.trim();
     if (!text || status === "streaming") return;
 
+    // Assign session ID on first message.
+    if (!sessionIdRef.current) {
+      sessionIdRef.current = generateSessionId();
+    }
+
     setInput("");
     setStatus("streaming");
 
+    const userEntry: ChatEntry = { kind: "user", text };
     const userMsg: Message = { role: "user", content: text };
-    setEntries((prev) => [...prev, { kind: "user", text }]);
-    const nextHistory = [...history, userMsg];
-    setHistory(nextHistory);
 
-    const sysPrompt = buildSystemPrompt(
-      scenario.systemPrompt,
-      charactersRef.current,
-    );
+    setEntries((prev) => {
+      const next = [...prev, userEntry];
+      entriesRef.current = next;
+      return next;
+    });
+
+    const nextHistory = [...historyRef.current, userMsg];
+    setHistory(nextHistory);
+    historyRef.current = nextHistory;
+
+    const sysPrompt = buildSystemPrompt(scenario.systemPrompt, charactersRef.current);
 
     await streamCompletion(nextHistory.slice(-40), sysPrompt, scenario.model, {
       onTool(event: ToolEvent, _id: string) {
         if (event.type === "create_character") {
           const c: Character = { ...event.input, createdAt: Date.now() };
-          // Update ref synchronously so speak_as calls in the same batch see it.
-          const updated = upsertCharacter(
-            scenario.id,
-            c,
-            charactersRef.current,
-          );
+          const updated = upsertCharacter(scenario.id, c, charactersRef.current);
           charactersRef.current = updated;
           setCharacters(updated);
-          setEntries((prev) => [
-            ...prev,
-            {
-              kind: "system",
-              text: `${c.icon} ${c.name} has entered the scene.`,
-            },
-          ]);
+          const sysEntry: ChatEntry = { kind: "system", text: `${c.icon} ${c.name} has entered the scene.` };
+          setEntries((prev) => {
+            const next = [...prev, sysEntry];
+            entriesRef.current = next;
+            return next;
+          });
         } else if (event.type === "speak_as") {
           const { character_id, content, mood_after } = event.input;
-          // Read from ref — React state may not have flushed yet.
           const char = charactersRef.current[character_id];
-          setEntries((prev) => [
-            ...prev,
-            {
-              kind: "speech",
-              name: char?.name ?? character_id,
-              icon: char?.icon ?? "?",
-              color: char?.color ?? "white",
-              text: content,
-            },
-          ]);
+          const speechEntry: ChatEntry = {
+            kind: "speech",
+            name: char?.name ?? character_id,
+            icon: char?.icon ?? "?",
+            color: char?.color ?? "white",
+            text: content,
+          };
+          setEntries((prev) => {
+            const next = [...prev, speechEntry];
+            entriesRef.current = next;
+            return next;
+          });
           if (mood_after && char) {
-            const updated = updateMood(
-              scenario.id,
-              character_id,
-              mood_after,
-              charactersRef.current,
-            );
+            const updated = updateMood(scenario.id, character_id, mood_after, charactersRef.current);
             charactersRef.current = updated;
             setCharacters(updated);
           }
         } else if (event.type === "narrator") {
-          setEntries((prev) => [
-            ...prev,
-            { kind: "narrator", text: event.input.content },
-          ]);
+          const narrEntry: ChatEntry = { kind: "narrator", text: event.input.content };
+          setEntries((prev) => {
+            const next = [...prev, narrEntry];
+            entriesRef.current = next;
+            return next;
+          });
         }
       },
 
       onTextChunk(_chunk: string) {
-        // tool_choice:"required" means no plain text; nothing to do.
+        // tool_choice:"required" — no plain text expected.
       },
 
       onDone(assistantMsg, toolResultMsgs) {
-        setHistory([...nextHistory, assistantMsg, ...toolResultMsgs]);
+        const finalHistory = [...nextHistory, assistantMsg, ...toolResultMsgs];
+        setHistory(finalHistory);
+        historyRef.current = finalHistory;
+
+        // Auto-save after every successful response.
+        saveSession({
+          id: sessionIdRef.current,
+          scenarioId: scenario.id,
+          savedAt: Date.now(),
+          preview: buildPreview(entriesRef.current),
+          entries: entriesRef.current,
+          history: finalHistory,
+          characters: charactersRef.current,
+        });
+
         setStatus("idle");
       },
 
@@ -327,7 +362,7 @@ export default function ChatScreen({ scenario, onBack }: Props) {
         setStatus("error");
       },
     });
-  }, [input, history, status, scenario]);
+  }, [input, status, scenario]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -341,6 +376,9 @@ export default function ChatScreen({ scenario, onBack }: Props) {
           <Text color="white">{scenario.title}</Text>
           {"  "}
           <Text dimColor>· Esc to go back</Text>
+          {sessionIdRef.current && (
+            <Text dimColor>{"  · auto-saving"}</Text>
+          )}
         </Text>
       </Box>
       <Box paddingX={2}>
@@ -349,7 +387,6 @@ export default function ChatScreen({ scenario, onBack }: Props) {
 
       {/* ── Body ── */}
       <Box flexDirection="row" height={chatPaneHeight}>
-        {/* Chat pane — fixed height, never overflows */}
         <Box
           flexDirection="column"
           flexGrow={1}
@@ -368,7 +405,6 @@ export default function ChatScreen({ scenario, onBack }: Props) {
           {status === "error" && <Text color="red">⚠ {errorMsg}</Text>}
         </Box>
 
-        {/* Sidebar — fixed width, never shrinks */}
         <CharacterSidebar characters={characters} />
       </Box>
 

@@ -1,4 +1,5 @@
 import { CHARACTER_TOOLS } from "./characters";
+import { writeLog } from "./logger";
 
 // ─── OpenAI-native message types (what OpenRouter actually speaks) ────────────
 
@@ -106,6 +107,14 @@ export async function streamCompletion(
     tool_choice: "required",
   };
 
+  const reqStart = Date.now();
+  writeLog("api_request", {
+    model,
+    system_prompt: systemPrompt,
+    messages,
+    tool_count: OPENAI_TOOLS.length,
+  });
+
   try {
     const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -120,6 +129,7 @@ export async function streamCompletion(
 
     if (!res.ok) {
       const err = await res.text();
+      writeLog("api_error", { status: res.status, body: err });
       callbacks.onError(`API error ${res.status}: ${err}`);
       return;
     }
@@ -247,8 +257,21 @@ export async function streamCompletion(
       });
     }
 
+    writeLog("api_response", {
+      duration_ms: Date.now() - reqStart,
+      tool_calls: toolCalls.map((tc) => ({
+        id: tc.id,
+        name: tc.function.name,
+        arguments: (() => {
+          try { return JSON.parse(tc.function.arguments); } catch { return tc.function.arguments; }
+        })(),
+      })),
+      text: accText || undefined,
+    });
+
     callbacks.onDone(assistantMsg, toolResultMsgs);
   } catch (e: any) {
+    writeLog("api_error", { error: e.message ?? String(e) });
     callbacks.onError(e.message ?? "Unknown error");
   }
 }

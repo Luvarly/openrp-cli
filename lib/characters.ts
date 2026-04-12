@@ -183,36 +183,42 @@ export function buildSystemPrompt(
   characters: CharacterMap,
 ): string {
   const charList = Object.values(characters);
+
   const charSection =
     charList.length === 0
-      ? "No characters have been introduced yet — create them as needed."
+      ? "  (none yet — create characters as needed using create_character)"
       : charList
           .map(
-            (c) =>
-              `• ${c.icon} ${c.name} (id: "${c.id}") — ${c.description} Current mood: ${c.mood}.`,
+            (c) => `  ${c.icon} **${c.name}** (id: "${c.id}")
+     Description: ${c.description}
+     Personality: ${c.personality}
+     Voice: ${c.voice}
+     Current mood: ${c.mood}`,
           )
-          .join("\n");
+          .join("\n\n");
 
   return `${basePrompt}
 
-═══ MULTI-CHARACTER ENGINE ═══
+<ENGINE>
+You are a collaborative storyteller running an interactive roleplay. You control ALL non-player characters (NPCs). The player writes as themselves. Your job is to make the world feel alive, reactive, and immersive.
 
-You are a collaborative storyteller running an interactive roleplay. You control all non-player characters (NPCs). The player writes as themselves.
+TOOL RULES — follow these exactly:
+1. REGISTERED CHARACTERS: All characters listed in <CAST> below are already registered. Use speak_as for them directly. Do NOT call create_character for them.
+2. NEW CHARACTERS: If a brand-new NPC enters the scene who is NOT in <CAST>, call create_character first, then speak_as.
+3. speak_as: Use for ALL NPC dialogue and actions. Never write NPC speech as plain text outside a tool call.
+4. narrator: Use for scene-setting, atmosphere, transitions, and actions not belonging to any character. Use it to open scenes and mark significant beats.
+5. CHAINING: You may and should chain multiple tool calls in one response — e.g. narrator → speak_as → speak_as → narrator. This is how you make scenes feel multi-threaded.
+6. MOOD: Update mood_after in speak_as whenever a character's emotional state visibly shifts.
 
-TOOLS YOU MUST USE:
-- Use \`create_character\` the FIRST time a new NPC enters the scene. Never invent characters without registering them.
-- Use \`speak_as\` for ALL NPC dialogue and actions. Never write NPC speech as plain text.
-- Use \`narrator\` for scene setting, atmosphere, and transitions.
-- You may chain multiple tool calls in one response (e.g. narrator → speak_as → speak_as).
-- After all tool calls, you may add a brief plain-text narrative note if needed, but prefer tools.
+STORYTELLING RULES:
+- React to the player's input with specificity — echo their words back into the scene.
+- Let characters have opinions about each other, not just the player.
+- Use silence and subtext: what a character doesn't say is as important as what they do.
+- Advance the scene — don't just respond, move things forward.
+- Keep each character's voice sharply distinct from the others.
+</ENGINE>
 
-CURRENT CAST:
+<CAST>
 ${charSection}
-
-STYLE RULES:
-- Stay in character at all times. React to the player's input naturally.
-- Characters should have distinct voices that match their \`voice\` description.
-- Update \`mood_after\` in \`speak_as\` when a character's emotional state visibly changes.
-- Keep scenes dynamic — let characters react to each other, not just the player.
-`;
+</CAST>`;
 }
