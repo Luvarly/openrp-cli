@@ -8,9 +8,14 @@ import { type CharacterMap } from "./characters";
 
 export type ChatEntry =
   | { kind: "user"; text: string }
-  | { kind: "speech"; name: string; icon: string; color: string; text: string }
+  | { kind: "speech"; name: string; icon: string; color: string; text: string; thoughts?: string }
   | { kind: "narrator"; text: string }
   | { kind: "system"; text: string };
+
+export interface Player {
+  name: string;
+  description: string;
+}
 
 // ─── Session ──────────────────────────────────────────────────────────────────
 
@@ -22,6 +27,10 @@ export interface Session {
   entries: ChatEntry[];
   history: Message[];
   characters: CharacterMap;
+  scene?: string;       // current dynamic scene description
+  player?: Player;      // player persona
+  inventory?: string[]; // player items
+  memories?: string[];  // long-term AI memory facts
 }
 
 // ─── Paths ────────────────────────────────────────────────────────────────────
@@ -87,6 +96,37 @@ export function listSessions(scenarioId: string): Session[] {
   } catch {
     return [];
   }
+}
+
+export function listAllSessions(): Session[] {
+  const sessionsBase = path.join(DATA_DIR, "sessions");
+  if (!fs.existsSync(sessionsBase)) return [];
+  
+  let all: Session[] = [];
+  try {
+    const scenarios = fs.readdirSync(sessionsBase);
+    for (const sc of scenarios) {
+      all = all.concat(listSessions(sc));
+    }
+  } catch {
+    // ignore
+  }
+  return all.sort((a, b) => b.savedAt - a.savedAt);
+}
+
+export function findSessionById(sessionId: string): Session | null {
+  const sessionsBase = path.join(DATA_DIR, "sessions");
+  if (!fs.existsSync(sessionsBase)) return null;
+  try {
+    const scenarios = fs.readdirSync(sessionsBase);
+    for (const sc of scenarios) {
+      const s = loadSession(sc, sessionId);
+      if (s) return s;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 export function deleteSession(scenarioId: string, sessionId: string): void {

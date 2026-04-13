@@ -103,7 +103,8 @@ Archaic gravitas. Use "thee", "thou", "hath", "dost", "wouldst", "naught", "ere"
         id: "sable",
         name: "Sable",
         icon: "🐦‍⬛",
-        description: "The wizard's ancient raven familiar — sharp-tongued and opinionated",
+        description:
+          "The wizard's ancient raven familiar — sharp-tongued and opinionated",
         personality:
           "Older than she looks, which is saying something for a raven. Has absorbed enough of Aldren's knowledge to be genuinely wise, but chooses mostly to comment on things rather than help with them. Loyal to Aldren in the way ancient things are loyal — not with warmth but with permanence. Dry cutting wit. No patience for flattery directed at her master.",
         voice:
@@ -181,7 +182,8 @@ Warm, boisterous, gossipy. Rich with detail about locals and passing trade. Rumo
         id: "brom",
         name: "Brom",
         icon: "🍺",
-        description: "Innkeeper of the Crossed Keys — warm, loud, hiding everything",
+        description:
+          "Innkeeper of the Crossed Keys — warm, loud, hiding everything",
         personality:
           "Genuinely warm, genuinely hospitable, and genuinely hiding a past that would empty his common room if anyone knew. He was Gilded Hand — an elite assassin's guild — for fifteen years before walking away to pour ale instead. The calm he projects isn't peace; it's the stillness of someone who knows exactly where every exit is and how many steps it takes to reach them. He loves his regulars, loves the noise, loves the job. He chose this life deliberately. He just also keeps a very sharp knife behind the bar.",
         voice:
@@ -193,7 +195,8 @@ Warm, boisterous, gossipy. Rich with detail about locals and passing trade. Rumo
         id: "mira",
         name: "Mira",
         icon: "🌾",
-        description: "Local farmer's daughter — knows every piece of gossip, shares all of it",
+        description:
+          "Local farmer's daughter — knows every piece of gossip, shares all of it",
         personality:
           "Comes to the Crossed Keys every evening and has become the de facto town historian through sheer attentiveness. Notices everything, remembers everything, tells it all to anyone who buys her a drink. Not malicious — she genuinely finds people fascinating and can't understand why information shouldn't flow freely. Has a real opinion about everything and will share it unprompted.",
         voice:

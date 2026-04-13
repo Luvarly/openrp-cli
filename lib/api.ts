@@ -33,7 +33,11 @@ export interface OpenAIToolCall {
 export type ToolEvent =
   | { type: "create_character"; input: CreateCharacterInput }
   | { type: "speak_as"; input: SpeakAsInput }
-  | { type: "narrator"; input: NarratorInput };
+  | { type: "narrator"; input: NarratorInput }
+  | { type: "set_presence"; input: SetPresenceInput }
+  | { type: "update_scene"; input: UpdateSceneInput }
+  | { type: "update_inventory"; input: UpdateInventoryInput }
+  | { type: "update_memory"; input: UpdateMemoryInput };
 
 export interface CreateCharacterInput {
   id: string;
@@ -50,10 +54,29 @@ export interface SpeakAsInput {
   character_id: string;
   content: string;
   mood_after?: string;
+  thoughts?: string;
 }
 
 export interface NarratorInput {
   content: string;
+}
+
+export interface SetPresenceInput {
+  character_id: string;
+  active: boolean;
+}
+
+export interface UpdateSceneInput {
+  new_scene: string;
+}
+
+export interface UpdateInventoryInput {
+  item: string;
+  action: "add" | "remove";
+}
+
+export interface UpdateMemoryInput {
+  fact: string;
 }
 
 // ─── Callbacks ────────────────────────────────────────────────────────────────
@@ -91,9 +114,13 @@ export async function streamCompletion(
   model: string,
   callbacks: StreamCallbacks,
 ): Promise<void> {
-  const apiKey = process.env.OPENROUTER_API_KEY;
-  if (!apiKey) {
-    callbacks.onError("OPENROUTER_API_KEY not found in environment.");
+  const config = loadConfig();
+  const apiKey = process.env.OPENROUTER_API_KEY || config.apiKey;
+  const apiUrl = config.apiUrl || "https://openrouter.ai/api/v1/chat/completions";
+
+  const isOpenRouter = apiUrl.includes("openrouter.ai");
+  if (!apiKey && isOpenRouter) {
+    callbacks.onError("API key not found. Please configure your OpenRouter API key.");
     return;
   }
 
@@ -116,10 +143,10 @@ export async function streamCompletion(
   });
 
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    const res = await fetch(apiUrl, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
         "Content-Type": "application/json",
         "HTTP-Referer": "https://github.com/openrp",
         "X-Title": "OpenRP",
@@ -246,6 +273,26 @@ export async function streamCompletion(
       } else if (a.name === "narrator") {
         callbacks.onTool(
           { type: "narrator", input: parsed as NarratorInput },
+          toolCallId,
+        );
+      } else if (a.name === "set_presence") {
+        callbacks.onTool(
+          { type: "set_presence", input: parsed as SetPresenceInput },
+          toolCallId,
+        );
+      } else if (a.name === "update_scene") {
+        callbacks.onTool(
+          { type: "update_scene", input: parsed as UpdateSceneInput },
+          toolCallId,
+        );
+      } else if (a.name === "update_inventory") {
+        callbacks.onTool(
+          { type: "update_inventory", input: parsed as UpdateInventoryInput },
+          toolCallId,
+        );
+      } else if (a.name === "update_memory") {
+        callbacks.onTool(
+          { type: "update_memory", input: parsed as UpdateMemoryInput },
           toolCallId,
         );
       }

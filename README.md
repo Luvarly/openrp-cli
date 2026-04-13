@@ -38,15 +38,3 @@ bun start
 Edit `src/scenarios.ts` and change the `model` field on any scenario to any model available on OpenRouter, e.g.:
 
 - `deepseek/deepseek-v3.2`
-
-## Project Structure
-
-```
-src/
-  index.tsx          # Entry point
-  App.tsx            # Root component, screen routing
-  ScenarioSelector.tsx  # Scenario picker UI
-  ChatScreen.tsx     # Chat interface with streaming
-  api.ts             # OpenRouter streaming client
-  scenarios.ts       # Scenario definitions
-```

@@ -13,6 +13,7 @@ export interface Character {
   voice: string; // speaking style, e.g. "gruff, uses nautical slang"
   color: "red" | "green" | "yellow" | "blue" | "magenta" | "cyan" | "white";
   mood: string; // current emotional state, mutated by the model
+  isActive?: boolean; // whether the character is currently in the scene
   createdAt: number;
 }
 
@@ -80,6 +81,17 @@ export function updateMood(
   const char = current[characterId];
   if (!char) return current;
   return upsertCharacter(scenarioId, { ...char, mood }, current);
+}
+
+export function updatePresence(
+  scenarioId: string,
+  characterId: string,
+  isActive: boolean,
+  current: CharacterMap,
+): CharacterMap {
+  const char = current[characterId];
+  if (!char) return current;
+  return upsertCharacter(scenarioId, { ...char, isActive }, current);
 }
 
 // ─── Tool definitions for the model ──────────────────────────────────────────
@@ -153,6 +165,11 @@ export const CHARACTER_TOOLS = [
           description:
             "What the character says and/or does (actions in *asterisks*)",
         },
+        thoughts: {
+          type: "string",
+          description:
+            "The character's internal reasoning and motivations for what they are about to say or do. Not spoken aloud.",
+        },
         mood_after: {
           type: "string",
           description:
@@ -174,6 +191,74 @@ export const CHARACTER_TOOLS = [
       required: ["content"],
     },
   },
+  {
+    name: "set_presence",
+    description:
+      "Update whether a character is currently present in the scene. Use this when a character leaves or enters the current location.",
+    input_schema: {
+      type: "object",
+      properties: {
+        character_id: {
+          type: "string",
+          description: "The id of the character",
+        },
+        active: {
+          type: "boolean",
+          description: "True if they are present in the current scene, false if they have left.",
+        },
+      },
+      required: ["character_id", "active"],
+    },
+  },
+  {
+    name: "update_scene",
+    description:
+      "Update the current scene description. Use this when the characters move to a new location or the environment significantly changes.",
+    input_schema: {
+      type: "object",
+      properties: {
+        new_scene: {
+          type: "string",
+          description: "The complete new scene description.",
+        },
+      },
+      required: ["new_scene"],
+    },
+  },
+  {
+    name: "update_inventory",
+    description:
+      "Add or remove an item from the player's inventory.",
+    input_schema: {
+      type: "object",
+      properties: {
+        item: {
+          type: "string",
+          description: "The item name.",
+        },
+        action: {
+          type: "string",
+          enum: ["add", "remove"],
+        },
+      },
+      required: ["item", "action"],
+    },
+  },
+  {
+    name: "update_memory",
+    description:
+      "Record a permanent memory or fact about the player, the world, or past events. This ensures you never forget it across a long session.",
+    input_schema: {
+      type: "object",
+      properties: {
+        fact: {
+          type: "string",
+          description: "A concise bullet point fact to remember permanently.",
+        },
+      },
+      required: ["fact"],
+    },
+  },
 ] as const;
 
 // ─── System prompt builder ────────────────────────────────────────────────────
@@ -181,13 +266,19 @@ export const CHARACTER_TOOLS = [
 export function buildSystemPrompt(
   basePrompt: string,
   characters: CharacterMap,
+  sceneOverride?: string,
+  player?: { name: string; description: string },
+  inventory?: string[],
+  memories?: string[],
 ): string {
   const charList = Object.values(characters);
+  const present = charList.filter((c) => c.isActive !== false);
+  const elsewhere = charList.filter((c) => c.isActive === false);
 
-  const charSection =
-    charList.length === 0
+  const presentSection =
+    present.length === 0
       ? "  (none yet — create characters as needed using create_character)"
-      : charList
+      : present
           .map(
             (c) => `  ${c.icon} **${c.name}** (id: "${c.id}")
      Description: ${c.description}
@@ -197,7 +288,41 @@ export function buildSystemPrompt(
           )
           .join("\n\n");
 
-  return `${basePrompt}
+  const elsewhereSection =
+    elsewhere.length === 0
+      ? ""
+      : "\n\n<ELSEWHERE>\n" +
+        elsewhere
+          .map(
+            (c) => `  ${c.icon} **${c.name}** (id: "${c.id}") - Currently NOT in the scene.`,
+          )
+          .join("\n") +
+        "\n</ELSEWHERE>";
+
+  let prompt = basePrompt;
+
+  if (sceneOverride) {
+    // Replace the <SCENE> block if it exists, or append it
+    if (/<SCENE>[\s\S]*?<\/SCENE>/.test(prompt)) {
+      prompt = prompt.replace(/<SCENE>[\s\S]*?<\/SCENE>/, `<SCENE>\n${sceneOverride}\n</SCENE>`);
+    } else {
+      prompt += `\n<SCENE>\n${sceneOverride}\n</SCENE>\n`;
+    }
+  }
+
+  const playerSection = player
+    ? `\n<PLAYER>\nName: ${player.name}\nDescription: ${player.description}\n</PLAYER>\n`
+    : "";
+
+  const inventorySection = inventory && inventory.length > 0
+    ? `\n<INVENTORY>\n${inventory.map(i => `- ${i}`).join("\n")}\n</INVENTORY>\n`
+    : "";
+
+  const memorySection = memories && memories.length > 0
+    ? `\n<MEMORIES>\n${memories.map(m => `- ${m}`).join("\n")}\n</MEMORIES>\n`
+    : "";
+
+  return `${prompt}${playerSection}${inventorySection}${memorySection}
 
 <ENGINE>
 You are a collaborative storyteller running an interactive roleplay. You control ALL non-player characters (NPCs). The player writes as themselves. Your job is to make the world feel alive, reactive, and immersive.
@@ -209,6 +334,10 @@ TOOL RULES — follow these exactly:
 4. narrator: Use for scene-setting, atmosphere, transitions, and actions not belonging to any character. Use it to open scenes and mark significant beats.
 5. CHAINING: You may and should chain multiple tool calls in one response — e.g. narrator → speak_as → speak_as → narrator. This is how you make scenes feel multi-threaded.
 6. MOOD: Update mood_after in speak_as whenever a character's emotional state visibly shifts.
+7. PRESENCE: Use set_presence to mark active: true when characters enter the scene, or active: false when they leave.
+8. SCENE: Use update_scene if the environment changes significantly or characters move to a new location.
+9. MEMORY: Use update_memory to record permanent facts that you must not forget.
+10. INVENTORY: Use update_inventory to give or take away items from the player.
 
 STORYTELLING RULES:
 - React to the player's input with specificity — echo their words back into the scene.
@@ -219,6 +348,6 @@ STORYTELLING RULES:
 </ENGINE>
 
 <CAST>
-${charSection}
-</CAST>`;
+${presentSection}
+</CAST>${elsewhereSection}`;
 }
