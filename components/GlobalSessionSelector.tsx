@@ -5,7 +5,7 @@ import {
   listAllSessions,
   deleteSession,
 } from "../lib/sessions.js";
-import { SCENARIOS } from "../lib/scenarios.js";
+import { getScenarios } from "../lib/scenarios.js";
 
 interface Props {
   onLoad: (session: Session) => void;
@@ -72,7 +72,8 @@ export default function GlobalSessionSelector({ onLoad, onBack }: Props) {
 
       {sessions.map((session, i) => {
         const isActive = i === selected;
-        const scenario = SCENARIOS.find(s => s.id === session.scenarioId);
+        const allScenarios = getScenarios();
+        const scenario = allScenarios.find(s => s.id === session.scenarioId);
         const title = scenario ? `${scenario.icon} ${scenario.title}` : session.scenarioId;
         return (
           <Box key={session.id} flexDirection="column" marginBottom={1}>

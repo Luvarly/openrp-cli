@@ -1,3 +1,7 @@
+import * as fs from "fs";
+import * as path from "path";
+import * as os from "os";
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 
 export interface StarterCharacter {
@@ -19,11 +23,74 @@ export interface Scenario {
   icon: string;
   model: string;
   starterCharacters?: StarterCharacter[];
+  isCustom?: boolean;
+}
+
+// ─── Paths ────────────────────────────────────────────────────────────────────
+
+const DATA_DIR = path.join(os.homedir(), ".openrp");
+
+function scenariosDir(): string {
+  return path.join(DATA_DIR, "scenarios");
+}
+
+function scenarioFile(id: string): string {
+  return path.join(scenariosDir(), `${id}.json`);
+}
+
+function ensureDir(dir: string): void {
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+}
+
+// ─── Operations ───────────────────────────────────────────────────────────────
+
+export function getScenarios(): Scenario[] {
+  const custom = loadCustomScenarios();
+  return [...BUILTIN_SCENARIOS, ...custom];
+}
+
+export function loadCustomScenarios(): Scenario[] {
+  const dir = scenariosDir();
+  if (!fs.existsSync(dir)) return [];
+  try {
+    return fs
+      .readdirSync(dir)
+      .filter((f) => f.endsWith(".json"))
+      .map((f) => {
+        try {
+          const s = JSON.parse(
+            fs.readFileSync(path.join(dir, f), "utf-8"),
+          ) as Scenario;
+          s.isCustom = true;
+          return s;
+        } catch {
+          return null;
+        }
+      })
+      .filter((s): s is Scenario => s !== null);
+  } catch {
+    return [];
+  }
+}
+
+export function saveScenario(scenario: Scenario): void {
+  const dir = scenariosDir();
+  ensureDir(dir);
+  fs.writeFileSync(
+    scenarioFile(scenario.id),
+    JSON.stringify(scenario, null, 2),
+    "utf-8",
+  );
+}
+
+export function deleteScenario(id: string): void {
+  const file = scenarioFile(id);
+  if (fs.existsSync(file)) fs.unlinkSync(file);
 }
 
 // ─── Scenarios ────────────────────────────────────────────────────────────────
 
-export const SCENARIOS: Scenario[] = [
+export const BUILTIN_SCENARIOS: Scenario[] = [
   {
     id: "detective",
     title: "Noir Detective",
@@ -217,24 +284,5 @@ Warm, boisterous, gossipy. Rich with detail about locals and passing trade. Rumo
         mood: "drowsy, content",
       },
     ],
-  },
-
-  {
-    id: "custom",
-    title: "Custom Scenario",
-    description: "Define your own character & world",
-    icon: "✨",
-    model: "deepseek/deepseek-v3.2",
-    systemPrompt: `<WORLD>
-The world is whatever the player establishes in their first message. Adapt completely.
-</WORLD>
-
-<SCENE>
-The scene is whatever the player sets up. Follow their lead on tone, setting, and genre.
-</SCENE>
-
-<TONE>
-Match the tone the player establishes — serious, comedic, horror, romance, action, or anything else. Stay fully in character once the scenario is defined. Be creative and make the story engaging. If the player hasn't defined the world yet, gently ask them to describe the setting and who they'd like to interact with.
-</TONE>`,
   },
 ];

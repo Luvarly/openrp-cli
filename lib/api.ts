@@ -37,7 +37,8 @@ export type ToolEvent =
   | { type: "set_presence"; input: SetPresenceInput }
   | { type: "update_scene"; input: UpdateSceneInput }
   | { type: "update_inventory"; input: UpdateInventoryInput }
-  | { type: "update_memory"; input: UpdateMemoryInput };
+  | { type: "update_memory"; input: UpdateMemoryInput }
+  | { type: "update_scenario"; input: UpdateScenarioInput };
 
 export interface CreateCharacterInput {
   id: string;
@@ -77,6 +78,11 @@ export interface UpdateInventoryInput {
 
 export interface UpdateMemoryInput {
   fact: string;
+}
+
+export interface UpdateScenarioInput {
+  description?: string;
+  systemPrompt?: string;
 }
 
 // ─── Callbacks ────────────────────────────────────────────────────────────────

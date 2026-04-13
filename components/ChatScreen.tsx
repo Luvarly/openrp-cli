@@ -269,12 +269,14 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
 
   // ── State ──────────────────────────────────────────────────────────────────
 
+  const [localScenario, setLocalScenario] = useState<Scenario>(scenario);
+
   const [characters, setCharacters] = useState<CharacterMap>(() => {
     if (initialSession) return initialSession.characters;
     // Fresh session: load saved characters, then seed starters for any missing.
-    const saved = loadCharacters(scenario.id);
+    const saved = loadCharacters(localScenario.id);
     const seeded = { ...saved };
-    for (const sc of scenario.starterCharacters ?? []) {
+    for (const sc of localScenario.starterCharacters ?? []) {
       if (!seeded[sc.id]) seeded[sc.id] = { ...sc, createdAt: 0 };
     }
     return seeded;
@@ -300,6 +302,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
   // ── Refs ───────────────────────────────────────────────────────────────────
 
   // Mirror refs so async callbacks always read the latest values.
+  const localScenarioRef = useRef<Scenario>(localScenario);
   const charactersRef = useRef<CharacterMap>(characters);
   const entriesRef = useRef<ChatEntry[]>(entries);
   const historyRef = useRef<Message[]>(history);
@@ -308,6 +311,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
   const memoriesRef = useRef<string[]>(memories);
   const playerRef = useRef(player);
 
+  useEffect(() => { localScenarioRef.current = localScenario; }, [localScenario]);
   useEffect(() => { charactersRef.current = characters; }, [characters]);
   useEffect(() => { historyRef.current = history; }, [history]);
   useEffect(() => { sceneRef.current = scene; }, [scene]);
@@ -346,6 +350,44 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
     const text = input.trim();
     if (!text || status === "streaming") return;
 
+    // Handle slash commands
+    if (text.startsWith("/model ")) {
+      const newModel = text.slice(7).trim();
+      if (newModel) {
+        setLocalScenario((prev) => {
+          const next = { ...prev, model: newModel };
+          localScenarioRef.current = next;
+          return next;
+        });
+        const sysEntry: ChatEntry = { kind: "system", text: `Model changed to ${newModel}` };
+        setEntries((prev) => {
+          const next = [...prev, sysEntry];
+          entriesRef.current = next;
+          return next;
+        });
+        setInput("");
+        
+        // Save if session already exists
+        if (sessionIdRef.current) {
+          saveSession({
+            id: sessionIdRef.current,
+            scenarioId: localScenarioRef.current.id,
+            scenario: localScenarioRef.current,
+            savedAt: Date.now(),
+            preview: buildPreview(entriesRef.current),
+            entries: entriesRef.current,
+            history: historyRef.current,
+            characters: charactersRef.current,
+            scene: sceneRef.current,
+            player: playerRef.current,
+            inventory: inventoryRef.current,
+            memories: memoriesRef.current,
+          });
+        }
+      }
+      return;
+    }
+
     // Assign session ID on first message.
     if (!sessionIdRef.current) {
       sessionIdRef.current = generateSessionId();
@@ -368,7 +410,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
     historyRef.current = nextHistory;
 
     const sysPrompt = buildSystemPrompt(
-      scenario.systemPrompt,
+      localScenarioRef.current.systemPrompt,
       charactersRef.current,
       sceneRef.current,
       playerRef.current,
@@ -376,11 +418,11 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
       memoriesRef.current
     );
 
-    await streamCompletion(nextHistory.slice(-40), sysPrompt, scenario.model, {
+    await streamCompletion(nextHistory.slice(-40), sysPrompt, localScenarioRef.current.model, {
       onTool(event: ToolEvent, _id: string) {
         if (event.type === "create_character") {
           const c: Character = { ...event.input, createdAt: Date.now() };
-          const updated = upsertCharacter(scenario.id, c, charactersRef.current);
+          const updated = upsertCharacter(localScenarioRef.current.id, c, charactersRef.current);
           charactersRef.current = updated;
           setCharacters(updated);
           const sysEntry: ChatEntry = { kind: "system", text: `${c.icon} ${c.name} has entered the scene.` };
@@ -406,7 +448,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
             return next;
           });
           if (mood_after && char) {
-            const updated = updateMood(scenario.id, character_id, mood_after, charactersRef.current);
+            const updated = updateMood(localScenarioRef.current.id, character_id, mood_after, charactersRef.current);
             charactersRef.current = updated;
             setCharacters(updated);
           }
@@ -421,7 +463,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
           const { character_id, active } = event.input;
           const char = charactersRef.current[character_id];
           if (char) {
-            const updated = updatePresence(scenario.id, character_id, active, charactersRef.current);
+            const updated = updatePresence(localScenarioRef.current.id, character_id, active, charactersRef.current);
             charactersRef.current = updated;
             setCharacters(updated);
             const sysEntry: ChatEntry = { kind: "system", text: `${char.icon} ${char.name} has ${active ? "entered" : "left"} the scene.` };
@@ -468,6 +510,21 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
             entriesRef.current = next;
             return next;
           });
+        } else if (event.type === "update_scenario") {
+          const { description, systemPrompt } = event.input;
+          setLocalScenario((prev) => {
+            const next = { ...prev };
+            if (description) next.description = description;
+            if (systemPrompt) next.systemPrompt = systemPrompt;
+            localScenarioRef.current = next;
+            return next;
+          });
+          const sysEntry: ChatEntry = { kind: "system", text: `The core scenario has evolved.` };
+          setEntries((prev) => {
+            const next = [...prev, sysEntry];
+            entriesRef.current = next;
+            return next;
+          });
         }
       },
 
@@ -483,7 +540,8 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
         // Auto-save after every successful response.
         saveSession({
           id: sessionIdRef.current,
-          scenarioId: scenario.id,
+          scenarioId: localScenarioRef.current.id,
+          scenario: localScenarioRef.current,
           savedAt: Date.now(),
           preview: buildPreview(entriesRef.current),
           entries: entriesRef.current,
@@ -503,7 +561,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
         setStatus("error");
       },
     });
-  }, [input, status, scenario]);
+  }, [input, status, localScenario]);
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -512,9 +570,9 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
       {/* ── Header ── */}
       <Box paddingX={2} paddingTop={1}>
         <Text bold color="magenta">
-          {scenario.icon}
+          {localScenario.icon}
           {"  "}
-          <Text color="white">{scenario.title}</Text>
+          <Text color="white">{localScenario.title}</Text>
           {"  "}
           <Text dimColor>· Esc to go back</Text>
           {sessionIdRef.current && (
@@ -536,7 +594,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
         >
           {entries.length === 0 && status === "idle" && (
             <Text dimColor italic>
-              {scenario.description}. Type your first message to begin…
+              {localScenario.description}. Type your first message to begin…
             </Text>
           )}
           {visibleEntries.map((entry, i) => (

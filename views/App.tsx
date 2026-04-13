@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { useInput, useApp } from "ink";
-import { SCENARIOS, type Scenario } from "../lib/scenarios.js";
+import { getScenarios, type Scenario } from "../lib/scenarios.js";
 import { type Session, type Player, listSessions, findSessionById } from "../lib/sessions.js";
 import { loadConfig } from "../lib/config.js";
 import ScenarioSelector from "../components/ScenarioSelector.js";
@@ -9,8 +9,9 @@ import GlobalSessionSelector from "../components/GlobalSessionSelector.js";
 import PlayerSetup from "../components/PlayerSetup.js";
 import ChatScreen from "../components/ChatScreen.js";
 import ConfigScreen from "../components/ConfigScreen.js";
+import ScenarioCreator from "../components/ScenarioCreator.js";
 
-type Screen = "config" | "select" | "global_session" | "session" | "setup" | "chat";
+type Screen = "config" | "select" | "global_session" | "session" | "setup" | "chat" | "create_scenario";
 
 interface Props {
   initialCommand?: string;
@@ -28,7 +29,6 @@ export default function App({ initialCommand, initialArg }: Props) {
   useEffect(() => {
     const cfg = loadConfig();
     if (!cfg.apiKey && cfg.apiUrl === "https://openrouter.ai/api/v1/chat/completions") {
-      // Prompt for config on first run if they haven't set an API key but are using openrouter
       setScreen("config");
       return;
     }
@@ -37,7 +37,7 @@ export default function App({ initialCommand, initialArg }: Props) {
       if (initialArg) {
         const s = findSessionById(initialArg);
         if (s) {
-          const sc = SCENARIOS.find((x) => x.id === s.scenarioId);
+          const sc = s.scenario || getScenarios().find((x) => x.id === s.scenarioId);
           if (sc) {
             setScenario(sc);
             setInitialSession(s);
@@ -73,7 +73,7 @@ export default function App({ initialCommand, initialArg }: Props) {
     return (
       <GlobalSessionSelector
         onLoad={(session) => {
-          const sc = SCENARIOS.find((x) => x.id === session.scenarioId);
+          const sc = session.scenario || getScenarios().find((x) => x.id === session.scenarioId);
           if (sc) {
             setScenario(sc);
             setInitialSession(session);
@@ -84,6 +84,20 @@ export default function App({ initialCommand, initialArg }: Props) {
         onBack={() => {
           if (initialCommand === "resume") exit();
           else setScreen("select");
+        }}
+      />
+    );
+  }
+
+  if (screen === "create_scenario") {
+    return (
+      <ScenarioCreator
+        onComplete={(newScenario) => {
+          setScenario(newScenario);
+          setScreen("setup");
+        }}
+        onBack={() => {
+          setScreen("select");
         }}
       />
     );
@@ -109,7 +123,7 @@ export default function App({ initialCommand, initialArg }: Props) {
   if (screen === "chat" && scenario) {
     return (
       <ChatScreen
-        scenario={scenario}
+        scenario={initialSession?.scenario || scenario}
         initialSession={initialSession}
         player={player}
         onBack={() => {
@@ -151,6 +165,9 @@ export default function App({ initialCommand, initialArg }: Props) {
         setScenario(s);
         const saved = listSessions(s.id);
         setScreen(saved.length > 0 ? "session" : "setup");
+      }}
+      onCreate={() => {
+        setScreen("create_scenario");
       }}
     />
   );

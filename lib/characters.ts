@@ -204,7 +204,8 @@ export const CHARACTER_TOOLS = [
         },
         active: {
           type: "boolean",
-          description: "True if they are present in the current scene, false if they have left.",
+          description:
+            "True if they are present in the current scene, false if they have left.",
         },
       },
       required: ["character_id", "active"],
@@ -227,8 +228,7 @@ export const CHARACTER_TOOLS = [
   },
   {
     name: "update_inventory",
-    description:
-      "Add or remove an item from the player's inventory.",
+    description: "Add or remove an item from the player's inventory.",
     input_schema: {
       type: "object",
       properties: {
@@ -294,7 +294,8 @@ export function buildSystemPrompt(
       : "\n\n<ELSEWHERE>\n" +
         elsewhere
           .map(
-            (c) => `  ${c.icon} **${c.name}** (id: "${c.id}") - Currently NOT in the scene.`,
+            (c) =>
+              `  ${c.icon} **${c.name}** (id: "${c.id}") - Currently NOT in the scene.`,
           )
           .join("\n") +
         "\n</ELSEWHERE>";
@@ -304,7 +305,10 @@ export function buildSystemPrompt(
   if (sceneOverride) {
     // Replace the <SCENE> block if it exists, or append it
     if (/<SCENE>[\s\S]*?<\/SCENE>/.test(prompt)) {
-      prompt = prompt.replace(/<SCENE>[\s\S]*?<\/SCENE>/, `<SCENE>\n${sceneOverride}\n</SCENE>`);
+      prompt = prompt.replace(
+        /<SCENE>[\s\S]*?<\/SCENE>/,
+        `<SCENE>\n${sceneOverride}\n</SCENE>`,
+      );
     } else {
       prompt += `\n<SCENE>\n${sceneOverride}\n</SCENE>\n`;
     }
@@ -314,13 +318,15 @@ export function buildSystemPrompt(
     ? `\n<PLAYER>\nName: ${player.name}\nDescription: ${player.description}\n</PLAYER>\n`
     : "";
 
-  const inventorySection = inventory && inventory.length > 0
-    ? `\n<INVENTORY>\n${inventory.map(i => `- ${i}`).join("\n")}\n</INVENTORY>\n`
-    : "";
+  const inventorySection =
+    inventory && inventory.length > 0
+      ? `\n<INVENTORY>\n${inventory.map((i) => `- ${i}`).join("\n")}\n</INVENTORY>\n`
+      : "";
 
-  const memorySection = memories && memories.length > 0
-    ? `\n<MEMORIES>\n${memories.map(m => `- ${m}`).join("\n")}\n</MEMORIES>\n`
-    : "";
+  const memorySection =
+    memories && memories.length > 0
+      ? `\n<MEMORIES>\n${memories.map((m) => `- ${m}`).join("\n")}\n</MEMORIES>\n`
+      : "";
 
   return `${prompt}${playerSection}${inventorySection}${memorySection}
 
@@ -338,6 +344,7 @@ TOOL RULES — follow these exactly:
 8. SCENE: Use update_scene if the environment changes significantly or characters move to a new location.
 9. MEMORY: Use update_memory to record permanent facts that you must not forget.
 10. INVENTORY: Use update_inventory to give or take away items from the player.
+11. SCENARIO: Use update_scenario to evolve the core premise or world state if it fundamentally changes.
 
 STORYTELLING RULES:
 - React to the player's input with specificity — echo their words back into the scene.

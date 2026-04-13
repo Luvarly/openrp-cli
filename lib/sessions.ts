@@ -22,6 +22,7 @@ export interface Player {
 export interface Session {
   id: string;           // e.g. "2026-04-12T15-30-00-123Z"
   scenarioId: string;
+  scenario?: any;       // Actually a Scenario, but using any here to avoid cyclical dependency if needed, or import Scenario.
   savedAt: number;      // Unix ms
   preview: string;      // first user message, truncated
   entries: ChatEntry[];
