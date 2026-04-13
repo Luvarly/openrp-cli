@@ -1,5 +1,6 @@
-import { CHARACTER_TOOLS } from "./characters";
-import { writeLog } from "./logger";
+import { CHARACTER_TOOLS } from "./characters.js";
+import { writeLog } from "./logger.js";
+import { loadConfig } from "./config.js";
 
 // ─── OpenAI-native message types (what OpenRouter actually speaks) ────────────
 

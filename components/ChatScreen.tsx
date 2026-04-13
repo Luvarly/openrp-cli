@@ -171,7 +171,10 @@ function CharacterSidebar({
           <Text dimColor>{"─".repeat(innerWidth)}</Text>
           {memories.map((mem, i) => (
             <Text key={i} dimColor italic>
-              · {mem.length > innerWidth - 2 ? mem.slice(0, innerWidth - 3) + "…" : mem}
+              ·{" "}
+              {mem.length > innerWidth - 2
+                ? mem.slice(0, innerWidth - 3) + "…"
+                : mem}
             </Text>
           ))}
         </Box>
@@ -213,12 +216,13 @@ function EntryView({
         <Text bold color={entry.color as any}>
           {entry.icon} {entry.name.toUpperCase()}
         </Text>
-        {entry.thoughts && wrapText(entry.thoughts, innerWidth).map((l, i) => (
-          <Text key={`t-${i}`} dimColor color="gray" italic>
-            {"  "}
-            {l}
-          </Text>
-        ))}
+        {entry.thoughts &&
+          wrapText(entry.thoughts, innerWidth).map((l, i) => (
+            <Text key={`t-${i}`} dimColor color="gray" italic>
+              {"  "}
+              {l}
+            </Text>
+          ))}
         {wrapText(entry.text, innerWidth).map((l, i) => (
           <Text key={i} color="yellow">
             {"  "}
@@ -258,7 +262,12 @@ function EntryView({
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export default function ChatScreen({ scenario, initialSession, player, onBack }: Props) {
+export default function ChatScreen({
+  scenario,
+  initialSession,
+  player,
+  onBack,
+}: Props) {
   const { stdout } = useStdout();
   const termWidth = stdout?.columns ?? 100;
   const termHeight = stdout?.rows ?? 30;
@@ -291,8 +300,12 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
   );
 
   const [scene, setScene] = useState<string | undefined>(initialSession?.scene);
-  const [inventory, setInventory] = useState<string[]>(initialSession?.inventory ?? []);
-  const [memories, setMemories] = useState<string[]>(initialSession?.memories ?? []);
+  const [inventory, setInventory] = useState<string[]>(
+    initialSession?.inventory ?? [],
+  );
+  const [memories, setMemories] = useState<string[]>(
+    initialSession?.memories ?? [],
+  );
 
   const [input, setInput] = useState("");
   const [status, setStatus] = useState<Status>("idle");
@@ -311,13 +324,27 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
   const memoriesRef = useRef<string[]>(memories);
   const playerRef = useRef(player);
 
-  useEffect(() => { localScenarioRef.current = localScenario; }, [localScenario]);
-  useEffect(() => { charactersRef.current = characters; }, [characters]);
-  useEffect(() => { historyRef.current = history; }, [history]);
-  useEffect(() => { sceneRef.current = scene; }, [scene]);
-  useEffect(() => { inventoryRef.current = inventory; }, [inventory]);
-  useEffect(() => { memoriesRef.current = memories; }, [memories]);
-  useEffect(() => { playerRef.current = player; }, [player]);
+  useEffect(() => {
+    localScenarioRef.current = localScenario;
+  }, [localScenario]);
+  useEffect(() => {
+    charactersRef.current = characters;
+  }, [characters]);
+  useEffect(() => {
+    historyRef.current = history;
+  }, [history]);
+  useEffect(() => {
+    sceneRef.current = scene;
+  }, [scene]);
+  useEffect(() => {
+    inventoryRef.current = inventory;
+  }, [inventory]);
+  useEffect(() => {
+    memoriesRef.current = memories;
+  }, [memories]);
+  useEffect(() => {
+    playerRef.current = player;
+  }, [player]);
 
   // Session ID — created on first message send, reused for auto-saves.
   const sessionIdRef = useRef<string>(initialSession?.id ?? "");
@@ -334,7 +361,11 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
     const budget = chatPaneHeight - (status === "streaming" ? 1 : 0);
     let used = 0;
     const result: ChatEntry[] = [];
-    const startIndex = Math.max(0, entries.length - 1 - scrollOffset);
+    if (entries.length === 0) return result;
+    
+    const actualOffset = Math.min(scrollOffset, entries.length - 1);
+    const startIndex = entries.length - 1 - actualOffset;
+    
     for (let i = startIndex; i >= 0; i--) {
       const lines = entryLineCount(entries[i]!, contentWidth);
       if (used + lines > budget) break;
@@ -359,14 +390,17 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
           localScenarioRef.current = next;
           return next;
         });
-        const sysEntry: ChatEntry = { kind: "system", text: `Model changed to ${newModel}` };
+        const sysEntry: ChatEntry = {
+          kind: "system",
+          text: `Model changed to ${newModel}`,
+        };
         setEntries((prev) => {
           const next = [...prev, sysEntry];
           entriesRef.current = next;
           return next;
         });
         setInput("");
-        
+
         // Save if session already exists
         if (sessionIdRef.current) {
           saveSession({
@@ -415,152 +449,199 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
       sceneRef.current,
       playerRef.current,
       inventoryRef.current,
-      memoriesRef.current
+      memoriesRef.current,
     );
 
-    await streamCompletion(nextHistory.slice(-40), sysPrompt, localScenarioRef.current.model, {
-      onTool(event: ToolEvent, _id: string) {
-        if (event.type === "create_character") {
-          const c: Character = { ...event.input, createdAt: Date.now() };
-          const updated = upsertCharacter(localScenarioRef.current.id, c, charactersRef.current);
-          charactersRef.current = updated;
-          setCharacters(updated);
-          const sysEntry: ChatEntry = { kind: "system", text: `${c.icon} ${c.name} has entered the scene.` };
-          setEntries((prev) => {
-            const next = [...prev, sysEntry];
-            entriesRef.current = next;
-            return next;
-          });
-        } else if (event.type === "speak_as") {
-          const { character_id, content, mood_after, thoughts } = event.input;
-          const char = charactersRef.current[character_id];
-          const speechEntry: ChatEntry = {
-            kind: "speech",
-            name: char?.name ?? character_id,
-            icon: char?.icon ?? "?",
-            color: char?.color ?? "white",
-            text: content,
-            thoughts,
-          };
-          setEntries((prev) => {
-            const next = [...prev, speechEntry];
-            entriesRef.current = next;
-            return next;
-          });
-          if (mood_after && char) {
-            const updated = updateMood(localScenarioRef.current.id, character_id, mood_after, charactersRef.current);
+    await streamCompletion(
+      nextHistory.slice(-40),
+      sysPrompt,
+      localScenarioRef.current.model,
+      {
+        onTool(event: ToolEvent, _id: string) {
+          if (event.type === "create_character") {
+            const c: Character = { ...event.input, createdAt: Date.now() };
+            const updated = upsertCharacter(
+              localScenarioRef.current.id,
+              c,
+              charactersRef.current,
+            );
             charactersRef.current = updated;
             setCharacters(updated);
-          }
-        } else if (event.type === "narrator") {
-          const narrEntry: ChatEntry = { kind: "narrator", text: event.input.content };
-          setEntries((prev) => {
-            const next = [...prev, narrEntry];
-            entriesRef.current = next;
-            return next;
-          });
-        } else if (event.type === "set_presence") {
-          const { character_id, active } = event.input;
-          const char = charactersRef.current[character_id];
-          if (char) {
-            const updated = updatePresence(localScenarioRef.current.id, character_id, active, charactersRef.current);
-            charactersRef.current = updated;
-            setCharacters(updated);
-            const sysEntry: ChatEntry = { kind: "system", text: `${char.icon} ${char.name} has ${active ? "entered" : "left"} the scene.` };
+            const sysEntry: ChatEntry = {
+              kind: "system",
+              text: `${c.icon} ${c.name} has entered the scene.`,
+            };
+            setEntries((prev) => {
+              const next = [...prev, sysEntry];
+              entriesRef.current = next;
+              return next;
+            });
+          } else if (event.type === "speak_as") {
+            const { character_id, content, mood_after, thoughts } = event.input;
+            const char = charactersRef.current[character_id];
+            const speechEntry: ChatEntry = {
+              kind: "speech",
+              name: char?.name ?? character_id,
+              icon: char?.icon ?? "?",
+              color: char?.color ?? "white",
+              text: content,
+              thoughts,
+            };
+            setEntries((prev) => {
+              const next = [...prev, speechEntry];
+              entriesRef.current = next;
+              return next;
+            });
+            if (mood_after && char) {
+              const updated = updateMood(
+                localScenarioRef.current.id,
+                character_id,
+                mood_after,
+                charactersRef.current,
+              );
+              charactersRef.current = updated;
+              setCharacters(updated);
+            }
+          } else if (event.type === "narrator") {
+            const narrEntry: ChatEntry = {
+              kind: "narrator",
+              text: event.input.content,
+            };
+            setEntries((prev) => {
+              const next = [...prev, narrEntry];
+              entriesRef.current = next;
+              return next;
+            });
+          } else if (event.type === "set_presence") {
+            const { character_id, active } = event.input;
+            const char = charactersRef.current[character_id];
+            if (char) {
+              const updated = updatePresence(
+                localScenarioRef.current.id,
+                character_id,
+                active,
+                charactersRef.current,
+              );
+              charactersRef.current = updated;
+              setCharacters(updated);
+              const sysEntry: ChatEntry = {
+                kind: "system",
+                text: `${char.icon} ${char.name} has ${active ? "entered" : "left"} the scene.`,
+              };
+              setEntries((prev) => {
+                const next = [...prev, sysEntry];
+                entriesRef.current = next;
+                return next;
+              });
+            }
+          } else if (event.type === "update_scene") {
+            const newScene = event.input.new_scene;
+            setScene(newScene);
+            sceneRef.current = newScene;
+            const sysEntry: ChatEntry = {
+              kind: "system",
+              text: `The scene has changed.`,
+            };
+            setEntries((prev) => {
+              const next = [...prev, sysEntry];
+              entriesRef.current = next;
+              return next;
+            });
+          } else if (event.type === "update_inventory") {
+            const { item, action } = event.input;
+            setInventory((prev) => {
+              const next =
+                action === "add"
+                  ? [...prev, item]
+                  : prev.filter((i) => i !== item);
+              inventoryRef.current = next;
+              return next;
+            });
+            const sysEntry: ChatEntry = {
+              kind: "system",
+              text: `Item ${action === "add" ? "added to" : "removed from"} inventory: ${item}`,
+            };
+            setEntries((prev) => {
+              const next = [...prev, sysEntry];
+              entriesRef.current = next;
+              return next;
+            });
+          } else if (event.type === "update_memory") {
+            const fact = event.input.fact;
+            setMemories((prev) => {
+              if (prev.includes(fact)) return prev;
+              const next = [...prev, fact];
+              memoriesRef.current = next;
+              return next;
+            });
+            const sysEntry: ChatEntry = {
+              kind: "system",
+              text: `Memory recorded: ${fact}`,
+            };
+            setEntries((prev) => {
+              const next = [...prev, sysEntry];
+              entriesRef.current = next;
+              return next;
+            });
+          } else if (event.type === "update_scenario") {
+            const { description, systemPrompt } = event.input;
+            setLocalScenario((prev) => {
+              const next = { ...prev };
+              if (description) next.description = description;
+              if (systemPrompt) next.systemPrompt = systemPrompt;
+              localScenarioRef.current = next;
+              return next;
+            });
+            const sysEntry: ChatEntry = {
+              kind: "system",
+              text: `The core scenario has evolved.`,
+            };
             setEntries((prev) => {
               const next = [...prev, sysEntry];
               entriesRef.current = next;
               return next;
             });
           }
-        } else if (event.type === "update_scene") {
-          const newScene = event.input.new_scene;
-          setScene(newScene);
-          sceneRef.current = newScene;
-          const sysEntry: ChatEntry = { kind: "system", text: `The scene has changed.` };
-          setEntries((prev) => {
-            const next = [...prev, sysEntry];
-            entriesRef.current = next;
-            return next;
+        },
+
+        onTextChunk(_chunk: string) {
+          // tool_choice:"required" — no plain text expected.
+        },
+
+        onDone(assistantMsg, toolResultMsgs) {
+          const finalHistory = [
+            ...nextHistory,
+            assistantMsg,
+            ...toolResultMsgs,
+          ];
+          setHistory(finalHistory);
+          historyRef.current = finalHistory;
+
+          // Auto-save after every successful response.
+          saveSession({
+            id: sessionIdRef.current,
+            scenarioId: localScenarioRef.current.id,
+            scenario: localScenarioRef.current,
+            savedAt: Date.now(),
+            preview: buildPreview(entriesRef.current),
+            entries: entriesRef.current,
+            history: finalHistory,
+            characters: charactersRef.current,
+            scene: sceneRef.current,
+            player: playerRef.current,
+            inventory: inventoryRef.current,
+            memories: memoriesRef.current,
           });
-        } else if (event.type === "update_inventory") {
-          const { item, action } = event.input;
-          setInventory((prev) => {
-            const next = action === "add" ? [...prev, item] : prev.filter((i) => i !== item);
-            inventoryRef.current = next;
-            return next;
-          });
-          const sysEntry: ChatEntry = { kind: "system", text: `Item ${action === "add" ? "added to" : "removed from"} inventory: ${item}` };
-          setEntries((prev) => {
-            const next = [...prev, sysEntry];
-            entriesRef.current = next;
-            return next;
-          });
-        } else if (event.type === "update_memory") {
-          const fact = event.input.fact;
-          setMemories((prev) => {
-            if (prev.includes(fact)) return prev;
-            const next = [...prev, fact];
-            memoriesRef.current = next;
-            return next;
-          });
-          const sysEntry: ChatEntry = { kind: "system", text: `Memory recorded: ${fact}` };
-          setEntries((prev) => {
-            const next = [...prev, sysEntry];
-            entriesRef.current = next;
-            return next;
-          });
-        } else if (event.type === "update_scenario") {
-          const { description, systemPrompt } = event.input;
-          setLocalScenario((prev) => {
-            const next = { ...prev };
-            if (description) next.description = description;
-            if (systemPrompt) next.systemPrompt = systemPrompt;
-            localScenarioRef.current = next;
-            return next;
-          });
-          const sysEntry: ChatEntry = { kind: "system", text: `The core scenario has evolved.` };
-          setEntries((prev) => {
-            const next = [...prev, sysEntry];
-            entriesRef.current = next;
-            return next;
-          });
-        }
+
+          setStatus("idle");
+        },
+
+        onError(err: string) {
+          setErrorMsg(err);
+          setStatus("error");
+        },
       },
-
-      onTextChunk(_chunk: string) {
-        // tool_choice:"required" — no plain text expected.
-      },
-
-      onDone(assistantMsg, toolResultMsgs) {
-        const finalHistory = [...nextHistory, assistantMsg, ...toolResultMsgs];
-        setHistory(finalHistory);
-        historyRef.current = finalHistory;
-
-        // Auto-save after every successful response.
-        saveSession({
-          id: sessionIdRef.current,
-          scenarioId: localScenarioRef.current.id,
-          scenario: localScenarioRef.current,
-          savedAt: Date.now(),
-          preview: buildPreview(entriesRef.current),
-          entries: entriesRef.current,
-          history: finalHistory,
-          characters: charactersRef.current,
-          scene: sceneRef.current,
-          player: playerRef.current,
-          inventory: inventoryRef.current,
-          memories: memoriesRef.current,
-        });
-
-        setStatus("idle");
-      },
-
-      onError(err: string) {
-        setErrorMsg(err);
-        setStatus("error");
-      },
-    });
+    );
   }, [input, status, localScenario]);
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -575,9 +656,7 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
           <Text color="white">{localScenario.title}</Text>
           {"  "}
           <Text dimColor>· Esc to go back</Text>
-          {sessionIdRef.current && (
-            <Text dimColor>{"  · auto-saving"}</Text>
-          )}
+          {sessionIdRef.current && <Text dimColor>{"  · auto-saving"}</Text>}
         </Text>
       </Box>
       <Box paddingX={2}>
@@ -604,7 +683,11 @@ export default function ChatScreen({ scenario, initialSession, player, onBack }:
           {status === "error" && <Text color="red">⚠ {errorMsg}</Text>}
         </Box>
 
-        <CharacterSidebar characters={characters} inventory={inventory} memories={memories} />
+        <CharacterSidebar
+          characters={characters}
+          inventory={inventory}
+          memories={memories}
+        />
       </Box>
 
       {/* ── Footer ── */}
